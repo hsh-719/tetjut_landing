@@ -6,12 +6,21 @@ const { useState, useEffect, useRef, useMemo } = React;
 const KPITracker = {
   sessionId: Date.now() + '-' + Math.random().toString(36).substr(2, 9),
   events: [],
+  sectionStates: {}, // 섹션별 상태 저장 (audience 특별 처리용)
+
+  // 중요 전환 이벤트 (GTM 즉시 전송)
+  criticalEvents: [
+    'signup_complete',
+    'signup_submit',
+    'cta_email_focus',
+    'ab_test_assigned'
+  ],
 
   // KPI 이벤트 기록
   track(eventName, data = {}) {
     const event = {
-      sessionId: this.sessionId,
       event: eventName,
+      session_id: this.sessionId,
       timestamp: Date.now(),
       url: window.location.href,
       ...data
@@ -31,13 +40,15 @@ const KPITracker = {
       localStorage.setItem('kpi_events', JSON.stringify(stored));
     } catch(e) {}
 
-    // 3. Google Tag Manager로 전송
-    if (typeof window !== 'undefined' && window.dataLayer) {
-      window.dataLayer.push({
-        event: eventName,
-        session_id: this.sessionId,
-        ...data
-      });
+    // 3. Google Tag Manager로 전송 (중요 이벤트만 즉시 전송)
+    if (this.criticalEvents.includes(eventName)) {
+      if (typeof window !== 'undefined' && window.dataLayer) {
+        window.dataLayer.push({
+          event: 'conversion_event',
+          conversion_type: eventName,
+          ...event
+        });
+      }
     }
 
     // 4. 서버로 전송 (필요시 활성화)
@@ -68,43 +79,247 @@ const KPITracker = {
       summary.byType[e.event] = (summary.byType[e.event] || 0) + 1;
     });
     return summary;
+  },
+
+  // 섹션별 정리 (variant 포함)
+  getBySection() {
+    const sections = {
+      hero: [],
+      problem: [],
+      solution: [],
+      preview: [],
+      audience: [],
+      cta: [] // CTA 별도
+    };
+
+    this.events.forEach(e => {
+      // 이벤트 이름에서 섹션 추출
+      const sectionMatch = e.event.match(/^(hero|problem|solution|preview|audience|cta)/);
+      if (sectionMatch) {
+        const section = sectionMatch[1];
+        sections[section].push(e);
+      } else if (e.event.includes('signup') || e.event === 'ab_test_assigned') {
+        // signup 관련은 CTA로 분류
+        sections.cta.push(e);
+      }
+    });
+
+    return sections;
+  },
+
+  // CTA 퍼널 분석 (variant별 분리)
+  getCTAFunnel() {
+    const ctaEvents = this.events.filter(e =>
+      e.event.includes('cta_') || e.event.includes('signup') || e.event === 'ab_test_assigned'
+    );
+
+    const byVariant = {
+      '터줏대감': [],
+      '방랑객': []
+    };
+
+    ctaEvents.forEach(e => {
+      if (e.variant) {
+        byVariant[e.variant].push(e);
+      }
+    });
+
+    return {
+      all: ctaEvents,
+      byVariant: byVariant,
+      stats: {
+        '터줏대감': {
+          assigned: byVariant['터줏대감'].filter(e => e.event === 'ab_test_assigned').length,
+          entered: byVariant['터줏대감'].filter(e => e.event === 'cta_enter').length,
+          focused: byVariant['터줏대감'].filter(e => e.event === 'cta_email_focus').length,
+          submitted: byVariant['터줏대감'].filter(e => e.event === 'signup_submit').length,
+          completed: byVariant['터줏대감'].filter(e => e.event === 'signup_complete').length
+        },
+        '방랑객': {
+          assigned: byVariant['방랑객'].filter(e => e.event === 'ab_test_assigned').length,
+          entered: byVariant['방랑객'].filter(e => e.event === 'cta_enter').length,
+          focused: byVariant['방랑객'].filter(e => e.event === 'cta_email_focus').length,
+          submitted: byVariant['방랑객'].filter(e => e.event === 'signup_submit').length,
+          completed: byVariant['방랑객'].filter(e => e.event === 'signup_complete').length
+        }
+      }
+    };
+  },
+
+  // 섹션별 체류 시간 요약
+  getSectionDwellSummary() {
+    const dwellEvents = this.events.filter(e => e.event.includes('_dwell'));
+    const summary = {};
+
+    dwellEvents.forEach(e => {
+      const section = e.section_name;
+      if (!summary[section]) {
+        summary[section] = {
+          total_dwell_time: 0,
+          visit_count: 0,
+          events: []
+        };
+      }
+
+      summary[section].total_dwell_time = e.total_dwell_time || e.dwell_time;
+      summary[section].visit_count = Math.max(summary[section].visit_count, e.visit_count || 1);
+      summary[section].events.push(e);
+    });
+
+    return summary;
+  },
+
+  // 세션 요약 생성 (GTM 전송용)
+  generateSessionSummary() {
+    const dwellSummary = this.getSectionDwellSummary();
+    const ctaFunnel = this.getCTAFunnel();
+
+    // 이탈 섹션 찾기
+    const exitEvents = this.events.filter(e => e.event.includes('_exit'));
+    const lastExit = exitEvents[exitEvents.length - 1];
+
+    // CTA 데이터
+    const ctaData = ctaFunnel.all.length > 0 ? {
+      variant: ctaFunnel.all[0].variant,
+      entered: ctaFunnel.stats[ctaFunnel.all[0].variant]?.entered > 0,
+      focused: ctaFunnel.stats[ctaFunnel.all[0].variant]?.focused > 0,
+      submitted: ctaFunnel.stats[ctaFunnel.all[0].variant]?.submitted > 0,
+      completed: ctaFunnel.stats[ctaFunnel.all[0].variant]?.completed > 0,
+      time_to_submit: this.events.find(e => e.event === 'signup_submit')?.time_to_submit || null
+    } : null;
+
+    // 방문한 섹션들
+    const sectionsVisited = Object.keys(dwellSummary);
+
+    // 총 세션 시간
+    const totalSessionTime = Object.values(dwellSummary)
+      .reduce((sum, s) => sum + (s.total_dwell_time || 0), 0);
+
+    return {
+      event: 'session_summary',
+      session_id: this.sessionId,
+      timestamp: Date.now(),
+
+      // 섹션별 요약
+      sections: Object.fromEntries(
+        Object.entries(dwellSummary).map(([name, data]) => [
+          name,
+          {
+            total_dwell: data.total_dwell_time,
+            visit_count: data.visit_count
+          }
+        ])
+      ),
+
+      // CTA 요약
+      cta: ctaData,
+
+      // 세션 메타데이터
+      total_session_time: totalSessionTime,
+      sections_visited: sectionsVisited,
+      exit_section: lastExit?.section_name || null,
+      reached_cta: sectionsVisited.includes('cta'),
+      converted: ctaData?.completed || false
+    };
+  },
+
+  // GTM에 세션 요약 전송
+  sendSessionSummary() {
+    const summary = this.generateSessionSummary();
+
+    if (typeof window !== 'undefined' && window.dataLayer) {
+      window.dataLayer.push(summary);
+      console.log('📊 세션 요약 전송:', summary);
+    }
   }
 };
 
 // 전역에서 접근 가능하게
 window.KPITracker = KPITracker;
 
+// ───────────── 세션 요약 전송 안전장치 ─────────────
+// 모바일 누락 방지: visibilitychange + beforeunload 이중 방어
+let sessionSummarySent = false;
+
+// 1. visibilitychange: 모바일 앱 전환, 탭 전환, 최소화 감지
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden && !sessionSummarySent) {
+    KPITracker.sendSessionSummary();
+    sessionSummarySent = true;
+    console.log('📊 세션 요약 전송 (visibilitychange)');
+  }
+});
+
+// 2. beforeunload: 정상적인 페이지 닫기 (Ctrl+W, X버튼, 네비게이션)
+window.addEventListener('beforeunload', () => {
+  if (!sessionSummarySent) {
+    KPITracker.sendSessionSummary();
+    sessionSummarySent = true;
+    console.log('📊 세션 요약 전송 (beforeunload)');
+  }
+});
+
 // ───────────── 섹션별 KPI 추적 훅 ─────────────
 
-// 섹션 체류 시간 & 노출 추적
+// 스크롤 깊이 계산 함수
+function getScrollDepth() {
+  const scrollTop = window.scrollY;
+  const docHeight = document.documentElement.scrollHeight - window.innerHeight;
+  return Math.round((scrollTop / docHeight) * 100);
+}
+
+// 섹션 체류 시간 & 노출 추적 (재진입 가능 + 누적 시간)
 function useSectionTracking(sectionName, options = {}) {
   const ref = useRef(null);
   const enterTimeRef = useRef(null);
-  const hasTrackedRef = useRef(false);
+  const totalDwellTimeRef = useRef(0); // 누적 체류 시간 (ms)
+  const visitCountRef = useRef(0); // 방문 횟수
 
   useEffect(() => {
     if (!ref.current) return;
+
+    // 섹션 상태를 KPITracker에 저장 (audience 특별 처리용)
+    KPITracker.sectionStates[sectionName] = {
+      enterTimeRef,
+      totalDwellTimeRef,
+      visitCountRef
+    };
 
     const observer = new IntersectionObserver(
       (entries) => {
         entries.forEach((entry) => {
           if (entry.isIntersecting) {
-            // 섹션 진입
-            if (!hasTrackedRef.current) {
-              enterTimeRef.current = Date.now();
+            // 섹션 진입 (재진입 포함)
+            if (!enterTimeRef.current) {
+              const enterTime = Date.now();
+              enterTimeRef.current = enterTime;
+              visitCountRef.current += 1;
+
               KPITracker.track(`${sectionName}_enter`, {
-                section: sectionName
+                section_name: sectionName,
+                enter_time: enterTime,
+                scroll_depth: getScrollDepth(),
+                visit_count: visitCountRef.current, // 몇 번째 방문인지
+                total_dwell_time: Math.round(totalDwellTimeRef.current / 1000) // 이전까지 누적 시간
               });
-              hasTrackedRef.current = true;
             }
           } else {
             // 섹션 이탈
             if (enterTimeRef.current) {
-              const dwellTime = Date.now() - enterTimeRef.current;
-              if (dwellTime > 1000) { // 1초 이상 머문 경우만 기록
+              const exitTime = Date.now();
+              const dwellTime = exitTime - enterTimeRef.current;
+
+              if (dwellTime > 500) { // 0.5초 이상 머문 경우만 기록
+                totalDwellTimeRef.current += dwellTime; // 누적
+
                 KPITracker.track(`${sectionName}_dwell`, {
-                  section: sectionName,
-                  dwellTime: Math.round(dwellTime / 1000) + 's'
+                  section_name: sectionName,
+                  enter_time: enterTimeRef.current,
+                  exit_time: exitTime,
+                  dwell_time: Math.round(dwellTime / 1000), // 이번 체류 시간
+                  total_dwell_time: Math.round(totalDwellTimeRef.current / 1000), // 총 누적 시간
+                  visit_count: visitCountRef.current,
+                  scroll_depth: getScrollDepth()
                 });
               }
               enterTimeRef.current = null;
@@ -120,10 +335,18 @@ function useSectionTracking(sectionName, options = {}) {
     // 페이지 이탈 시 체류 시간 기록
     const handleBeforeUnload = () => {
       if (enterTimeRef.current) {
-        const dwellTime = Date.now() - enterTimeRef.current;
+        const exitTime = Date.now();
+        const dwellTime = exitTime - enterTimeRef.current;
+        totalDwellTimeRef.current += dwellTime;
+
         KPITracker.track(`${sectionName}_exit`, {
-          section: sectionName,
-          dwellTime: Math.round(dwellTime / 1000) + 's'
+          section_name: sectionName,
+          enter_time: enterTimeRef.current,
+          exit_time: exitTime,
+          dwell_time: Math.round(dwellTime / 1000),
+          total_dwell_time: Math.round(totalDwellTimeRef.current / 1000),
+          visit_count: visitCountRef.current,
+          scroll_depth: getScrollDepth()
         });
       }
     };
@@ -313,9 +536,7 @@ function Hero({ onCTAClick }) {
 // ───────────── PROBLEM ─────────────
 function Problem() {
   const ref = useReveal();
-  const trackingRef = useSectionTracking('problem', { threshold: 0.5 });
-  const review1Ref = useElementTracking('ad_review_1');
-  const review2Ref = useElementTracking('ad_review_2');
+  const trackingRef = useSectionTracking('problem', { threshold: 0.3 });
 
   return (
     <section className="section problem" id="problem" ref={trackingRef}>
@@ -367,20 +588,60 @@ function Problem() {
               gap: '20px'
             }}>
               {/* 광고 리뷰 이미지 1 */}
-              <div ref={review1Ref} style={{
+              <div style={{
+                position: 'relative',
                 border: '1px solid rgba(242, 238, 230, 0.18)',
                 borderRadius: '4px',
                 overflow: 'hidden'
               }}>
+                {/* ADS 뱃지 */}
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  background: 'var(--flag)',
+                  color: 'var(--paper)',
+                  padding: '12px 28px',
+                  borderRadius: '6px',
+                  fontSize: '20px',
+                  fontWeight: '700',
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '0.12em',
+                  zIndex: 10,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.5)'
+                }}>
+                  ADS
+                </div>
                 <img src="src/review1.png" alt="광고 리뷰 예시 1" style={{ width: '100%', display: 'block' }} />
               </div>
 
               {/* 광고 리뷰 이미지 2 */}
-              <div ref={review2Ref} style={{
+              <div style={{
+                position: 'relative',
                 border: '1px solid rgba(242, 238, 230, 0.18)',
                 borderRadius: '4px',
                 overflow: 'hidden'
               }}>
+                {/* ADS 뱃지 */}
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '50%',
+                  transform: 'translate(-50%, -50%)',
+                  background: 'var(--flag)',
+                  color: 'var(--paper)',
+                  padding: '12px 28px',
+                  borderRadius: '6px',
+                  fontSize: '20px',
+                  fontWeight: '700',
+                  fontFamily: 'var(--font-mono)',
+                  letterSpacing: '0.12em',
+                  zIndex: 10,
+                  boxShadow: '0 4px 16px rgba(0,0,0,0.5)'
+                }}>
+                  ADS
+                </div>
                 <img src="src/review2.png" alt="광고 리뷰 예시 2" style={{ width: '100%', display: 'block' }} />
               </div>
             </div>
@@ -479,10 +740,7 @@ function StepIllu({ kind }) {
 
 function Solution() {
   const ref = useReveal();
-  const trackingRef = useSectionTracking('solution', { threshold: 0.5 });
-  const step1Ref = useElementTracking('solution_step_1');
-  const step2Ref = useElementTracking('solution_step_2');
-  const step3Ref = useElementTracking('solution_step_3');
+  const trackingRef = useSectionTracking('solution', { threshold: 0.3 });
 
   return (
     <section className="section" id="how" ref={trackingRef}>
@@ -490,42 +748,41 @@ function Solution() {
         <div className="section-head" ref={ref}>
           <div>
             <h2>
-              <span className="serif">매장을</span> <em style={{ fontStyle: "normal", color: "var(--flag)" }}>점령</em>한<br/>
-              <em style={{ fontStyle: "normal", color: "var(--flag)" }}>터줏대감</em>이 정보를 알려줍니다.<br></br>
+              광고 말고 <span className="serif">매장을</span> <em style={{ fontStyle: "normal", color: "var(--flag)" }}>점령</em>한<br/>
+              <em style={{ fontStyle: "normal", color: "var(--flag)" }}>터줏대감</em>에게 들으세요.<br></br>
             </h2>
             <p className="lede" style={{ marginTop: 24 }}>
-              매장 방문 인증과 결제 인증으로, 포인트를 계산하여 터줏대감이 등장합니다. <br></br>
-              무분별한 리뷰 노출이 아닌 인증된 사용자, 즉 <strong style={{ color: "var(--ink)" }}>터줏대감의 리뷰를 우선 노출</strong>합니다.
+              매장 방문 인증과 결제 인증으로, 점수를 계산하여 터줏대감이 등장합니다. <br></br>
+              무분별한 리뷰 노출이 아닌 인증된 사용자, <br></br> 즉 <strong style={{ color: "var(--ink)" }}>터줏대감의 리뷰를 우선 노출</strong>합니다.
             </p>
           </div>
         </div>
 
         <div className="steps-grid">
-          <div className="step-cell" ref={step1Ref}>
+          <div className="step-cell">
             <div className="step-num">STEP 01 · 인증</div>
             <div className="step-illu"><StepIllu kind="visit" /></div>
             <div className="step-title">방문하고,<br/>영수증을 찍습니다</div>
             <p className="step-body">
-              위치 기반으로 매장 방문이 자동 인증됩니다. 결제 영수증을 찍으면 사용 금액까지 검증됩니다.
-              가짜 방문, 가짜 리뷰는 구조적으로 불가능합니다.
+              위치 기반으로 매장 방문이 인증됩니다. 결제 영수증을 찍으면 사용 금액까지 인증됩니다.
             </p>
           </div>
-          <div className="step-cell" ref={step2Ref}>
+          <div className="step-cell">
             <div className="step-num">STEP 02 · 누적</div>
             <div className="step-illu"><StepIllu kind="stack" /></div>
-            <div className="step-title">방문할수록<br/>포인트가 쌓입니다</div>
+            <div className="step-title">방문과 결제를 반복할수록<br/>점수가 쌓입니다</div>
             <p className="step-body">
-              방문 횟수 × 사용 금액 × 시간 가중치로 포인트가 계산됩니다.
-              포인트로 다른 매장의 점령자 정보와 상세 리뷰를 열람할 수 있습니다.
+              방문 횟수, 사용 금액, 시간 가중치로 점수가 계산됩니다.
+              포인트로 다른 터줏대감들과 경쟁하며, 터줏대감만의 보상이 주어집니다.
             </p>
           </div>
-          <div className="step-cell" ref={step3Ref}>
+          <div className="step-cell">
             <div className="step-num">STEP 03 · 점령</div>
             <div className="step-illu"><StepIllu kind="flag" /></div>
-            <div className="step-title">1위가 되면<br/>매장을 점령합니다</div>
+            <div className="step-title">순위권에 오르면<br/>매장을 점령합니다</div>
             <p className="step-body">
-              점령자의 대표 리뷰가 검색 결과 최상단에 노출됩니다.
-              실시간 포인트로 순위가 변동되며, 누구든 더 자주 가면 자리를 빼앗을 수 있습니다.
+              매장 점령시, 매장의 터줏대감으로서 여러분들의 리뷰가
+              최상단에 노출됩니다. 실시간 포인트로 순위가 변동되며, 누구든지 터줏대감이 될 수 있습니다.
             </p>
           </div>
         </div>
@@ -537,7 +794,7 @@ function Solution() {
 // ───────────── PRODUCT PREVIEW ─────────────
 function ProductPreview() {
   const ref = useReveal();
-  const trackingRef = useSectionTracking('preview', { threshold: 0.5 });
+  const trackingRef = useSectionTracking('preview', { threshold: 0.3 });
   const previewImageRef = useElementTracking('preview_image');
 
   return (
@@ -583,12 +840,47 @@ function ProductPreview() {
 // ───────────── AUDIENCE ─────────────
 function Audience() {
   const ref = useReveal();
-  const trackingRef = useSectionTracking('audience', { threshold: 0.5 });
-  const cardTeojutRef = useElementTracking('audience_card_teojut');
-  const cardWandererRef = useElementTracking('audience_card_wanderer');
+  const trackingRef = useSectionTracking('audience', { threshold: 0.3 });
+  const sectionRef = useRef(null);
+
+  // Audience 특별 처리: 화면 위로 완전히 사라지면 dwell 강제 기록
+  useEffect(() => {
+    const handleScroll = () => {
+      if (!sectionRef.current) return;
+
+      const rect = sectionRef.current.getBoundingClientRect();
+      const audienceState = KPITracker.sectionStates['audience'];
+
+      // 섹션이 화면 위로 완전히 사라짐
+      if (rect.bottom < 0 && audienceState?.enterTimeRef.current) {
+        const exitTime = Date.now();
+        const dwellTime = exitTime - audienceState.enterTimeRef.current;
+
+        if (dwellTime > 500) {
+          audienceState.totalDwellTimeRef.current += dwellTime;
+
+          KPITracker.track('audience_dwell', {
+            section_name: 'audience',
+            enter_time: audienceState.enterTimeRef.current,
+            exit_time: exitTime,
+            dwell_time: Math.round(dwellTime / 1000),
+            total_dwell_time: Math.round(audienceState.totalDwellTimeRef.current / 1000),
+            visit_count: audienceState.visitCountRef.current,
+            scroll_depth: getScrollDepth(),
+            trigger: 'scroll_above' // 스크롤로 인한 강제 기록
+          });
+
+          audienceState.enterTimeRef.current = null;
+        }
+      }
+    };
+
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   return (
-    <section className="section" id="audience" ref={trackingRef}>
+    <section className="section" id="audience" ref={(el) => { trackingRef.current = el; sectionRef.current = el; }}>
       <div className="wrap">
         <div className="section-head" ref={ref}>
           <div>
@@ -600,7 +892,7 @@ function Audience() {
         </div>
 
         <div className="audience-grid">
-          <div className="audience-cell evangelist" ref={cardTeojutRef}>
+          <div className="audience-cell evangelist">
             <div className="audience-tag">터줏대감</div>
             <h3 className="audience-title">"내가 여기 잘 안다니까?<br/>진짜야!!"</h3>
             <p className="audience-quote">
@@ -611,7 +903,7 @@ function Audience() {
             </div>
           </div>
 
-          <div className="audience-cell seeker" ref={cardWandererRef}>
+          <div className="audience-cell seeker">
             <div className="audience-tag">방랑객</div>
             <h3 className="audience-title">"죄다 광고. 어떡해..?<br/>너가 여기 터줏대감 이구나!"</h3>
             <p className="audience-quote">
@@ -630,7 +922,12 @@ function Audience() {
 // ───────────── CTA ─────────────
 function CTA({ ctaRef }) {
   const ref = useReveal();
-  const trackingRef = useSectionTracking('cta', { threshold: 0.5 });
+  const trackingRef = useRef(null);
+
+  // CTA 퍼널 추적 시간
+  const ctaEnterTimeRef = useRef(null);
+  const emailFocusTimeRef = useRef(null);
+  const hasEnteredRef = useRef(false);
 
   // A/B 테스트: 터줏대감 vs 방랑객
   const [userType] = useState(() => {
@@ -648,20 +945,77 @@ function CTA({ ctaRef }) {
   const [submitted, setSubmitted] = useState(false);
   const [waitlistNum, setWaitlistNum] = useState(null);
 
+  // CTA 섹션 진입 감지 (IntersectionObserver 사용)
+  useEffect(() => {
+    if (!trackingRef.current) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting && !hasEnteredRef.current) {
+            const enterTime = Date.now();
+            ctaEnterTimeRef.current = enterTime;
+            hasEnteredRef.current = true;
+
+            // CTA 진입 시 audience_dwell 강제 기록
+            const audienceState = KPITracker.sectionStates['audience'];
+            if (audienceState?.enterTimeRef.current) {
+              const exitTime = Date.now();
+              const dwellTime = exitTime - audienceState.enterTimeRef.current;
+
+              if (dwellTime > 500) {
+                audienceState.totalDwellTimeRef.current += dwellTime;
+
+                KPITracker.track('audience_dwell', {
+                  section_name: 'audience',
+                  enter_time: audienceState.enterTimeRef.current,
+                  exit_time: exitTime,
+                  dwell_time: Math.round(dwellTime / 1000),
+                  total_dwell_time: Math.round(audienceState.totalDwellTimeRef.current / 1000),
+                  visit_count: audienceState.visitCountRef.current,
+                  scroll_depth: getScrollDepth(),
+                  trigger: 'cta_enter' // CTA 진입으로 인한 강제 기록
+                });
+
+                audienceState.enterTimeRef.current = null;
+              }
+            }
+
+            KPITracker.track('cta_enter', {
+              cta_enter_time: enterTime,
+              variant: userType,
+              scroll_depth: getScrollDepth()
+            });
+          }
+        });
+      },
+      { threshold: 0.3 }
+    );
+
+    observer.observe(trackingRef.current);
+    return () => observer.disconnect();
+  }, [userType]);
+
   // 폼 필드 상호작용 추적
   const handleEmailFocus = () => {
-    KPITracker.track('cta_email_focus', {
-      variant: userType
-    });
+    if (!emailFocusTimeRef.current) {
+      const focusTime = Date.now();
+      emailFocusTimeRef.current = focusTime;
+
+      const timeToFocus = ctaEnterTimeRef.current
+        ? Math.round((focusTime - ctaEnterTimeRef.current) / 1000)
+        : null;
+
+      KPITracker.track('cta_email_focus', {
+        variant: userType,
+        email_focus_time: focusTime,
+        time_to_focus: timeToFocus // 초 단위
+      });
+    }
   };
 
   const handleEmailChange = (e) => {
     setContact(e.target.value);
-    if (e.target.value.includes('@')) {
-      KPITracker.track('cta_email_valid_format', {
-        variant: userType
-      });
-    }
   };
 
   const handleRestaurantFocus = () => {
@@ -674,16 +1028,25 @@ function CTA({ ctaRef }) {
     e?.preventDefault?.();
     if (!contact.trim()) return;
 
-    // 전환 추적
+    const submitTime = Date.now();
+    const timeToSubmit = emailFocusTimeRef.current
+      ? Math.round((submitTime - emailFocusTimeRef.current) / 1000)
+      : null;
+
+    const num = 2848 + Math.floor(Math.random() * 5);
+    const emailDomain = contact.includes('@') ? contact.split('@')[1] : 'invalid';
+
+    // 제출 추적
     KPITracker.track('signup_submit', {
       variant: userType,
-      hasEmail: !!contact,
-      hasRestaurant: !!restaurant,
-      emailDomain: contact.includes('@') ? contact.split('@')[1] : 'invalid'
+      submit_time: submitTime,
+      time_to_submit: timeToSubmit, // 초 단위
+      has_restaurant: !!restaurant,
+      email_domain: emailDomain,
+      waitlist_number: num
     });
 
     setSubmitted(true);
-    const num = 2848 + Math.floor(Math.random() * 5);
     setWaitlistNum(num);
 
     // 최종 전환 완료 추적
@@ -691,7 +1054,8 @@ function CTA({ ctaRef }) {
       variant: userType,
       email: contact,
       restaurant: restaurant || null,
-      waitlistNumber: num
+      waitlist_number: num,
+      has_restaurant: !!restaurant
     });
 
     // A/B 테스트 버전 로깅
@@ -750,7 +1114,7 @@ function CTA({ ctaRef }) {
               </h2>
               <p className="cta-sub">
                 광고가 아닌, 진짜 터줏대감이 알려주는 맛집.<br/>
-                <strong style={{ color: "var(--paper)" }}>방랑객으로 신뢰할 수 있는 리뷰</strong>를 확인하세요.
+                <strong style={{ color: "var(--paper)" }}>방랑객으로서 신뢰할 수 있는 리뷰</strong>를 확인하세요.
               </p>
 
               {!submitted ? (
@@ -795,10 +1159,10 @@ const TWEAK_DEFAULTS = /*EDITMODE-BEGIN*/{
 
 const HEADLINES = {
   default: {
-    pre: <span style={{ fontSize: '0.75em' }}>누가봐도 광고</span>,
+    pre: <span style={{ fontSize: '0.70em' }}>누가봐도 광고,</span>,
     strike: "아시잖아요.",
     accent: "터줏대감",
-    rest: <><span style={{ fontSize: '0.75em' }}>이 <br/>증명합니다.</span></>,
+    rest: <><span style={{ fontSize: '0.70em' }}>이 <br/>이제는 증명합니다.</span></>,
   },
   declarative: {
     pre: "단골이 인정한 맛집,",
@@ -893,16 +1257,16 @@ function Hero2({ onCTAClick, headlineMode }) {
 
             <p className="lede hero-lede">
               구조적 신뢰를 보증하는 맛집 리뷰 플랫폼.<br></br>
-              방문 횟수와 사용 금액으로 터줏대감을 결정합니다.
+              터줏대감이 들려주는 이야기 들어보실래요?
             </p>
 
             <div className="hero-cta-row">
-              <button className="btn btn-primary" onClick={handleCTAClick}>
+              {/* <button className="btn btn-primary" onClick={handleCTAClick}>
                 사전 등록하기 <span className="btn-arrow">→</span>
               </button>
               <a href="#how" className="btn btn-ghost" onClick={handleLearnMoreClick}>
                 어떻게 작동하나요?
-              </a>
+              </a> */}
             </div>
           </div>
 
@@ -915,18 +1279,19 @@ function Hero2({ onCTAClick, headlineMode }) {
             {/* ADS 뱃지 */}
             <div style={{
               position: 'absolute',
-              top: '12px',
-              right: '12px',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
               background: 'var(--flag)',
               color: 'var(--paper)',
-              padding: '6px 14px',
-              borderRadius: '4px',
-              fontSize: '12px',
-              fontWeight: '600',
+              padding: '12px 28px',
+              borderRadius: '6px',
+              fontSize: '20px',
+              fontWeight: '700',
               fontFamily: 'var(--font-mono)',
-              letterSpacing: '0.08em',
+              letterSpacing: '0.12em',
               zIndex: 10,
-              boxShadow: '0 2px 8px rgba(0,0,0,0.4)'
+              boxShadow: '0 4px 16px rgba(0,0,0,0.5)'
             }}>
               ADS
             </div>

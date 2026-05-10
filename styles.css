@@ -147,6 +147,10 @@ p { margin: 0; text-wrap: pretty; }
   margin-bottom: clamp(40px, 5vw, 72px);
 }
 
+.section-head > div {
+  grid-column: 1 / -1;
+}
+
 .section-head .meta { display: flex; flex-direction: column; gap: 12px; }
 
 @media (max-width: 800px) {
@@ -1073,6 +1077,7 @@ p { margin: 0; text-wrap: pretty; }
   border-top: none;
   position: relative;
   overflow: hidden;
+  padding: clamp(120px, 14vw, 200px) 0;
 }
 
 .cta-bg {
