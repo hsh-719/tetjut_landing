@@ -10,10 +10,9 @@ const KPITracker = {
 
   // 중요 전환 이벤트 (GTM 즉시 전송)
   criticalEvents: [
-    'signup_complete',
-    'signup_submit',
-    'cta_email_focus',
-    'ab_test_assigned'
+    'signup_complete',     // 최종 전환 완료
+    'signup_submit',       // 제출 시도
+    'ab_test_assigned'     // A/B 테스트 배정
   ],
 
   // KPI 이벤트 기록
@@ -169,7 +168,7 @@ const KPITracker = {
     return summary;
   },
 
-  // 세션 요약 생성 (GTM 전송용)
+  // 세션 요약 생성 (GTM 전송용 - FLAT 구조)
   generateSessionSummary() {
     const dwellSummary = this.getSectionDwellSummary();
     const ctaFunnel = this.getCTAFunnel();
@@ -195,32 +194,40 @@ const KPITracker = {
     const totalSessionTime = Object.values(dwellSummary)
       .reduce((sum, s) => sum + (s.total_dwell_time || 0), 0);
 
-    return {
+    // FLAT 구조로 변환
+    const flatSummary = {
       event: 'session_summary',
       session_id: this.sessionId,
       timestamp: Date.now(),
 
-      // 섹션별 요약
-      sections: Object.fromEntries(
-        Object.entries(dwellSummary).map(([name, data]) => [
-          name,
-          {
-            total_dwell: data.total_dwell_time,
-            visit_count: data.visit_count
-          }
+      // 섹션별 데이터 flat하게 펼침
+      ...Object.fromEntries(
+        Object.entries(dwellSummary).flatMap(([name, data]) => [
+          [`${name}_total_dwell`, data.total_dwell_time || 0],
+          [`${name}_visit_count`, data.visit_count || 0]
         ])
       ),
 
-      // CTA 요약
-      cta: ctaData,
+      // CTA 데이터 flat하게 펼침
+      ...(ctaData ? {
+        cta_variant: ctaData.variant,
+        cta_entered: ctaData.entered,
+        cta_focused: ctaData.focused,
+        cta_submitted: ctaData.submitted,
+        cta_completed: ctaData.completed,
+        cta_time_to_submit: ctaData.time_to_submit
+      } : {}),
 
       // 세션 메타데이터
       total_session_time: totalSessionTime,
-      sections_visited: sectionsVisited,
+      sections_visited_count: sectionsVisited.length,
+      sections_visited_list: sectionsVisited.join(','), // 배열 → 문자열
       exit_section: lastExit?.section_name || null,
       reached_cta: sectionsVisited.includes('cta'),
       converted: ctaData?.completed || false
     };
+
+    return flatSummary;
   },
 
   // GTM에 세션 요약 전송
@@ -300,7 +307,7 @@ function useSectionTracking(sectionName, options = {}) {
                 enter_time: enterTime,
                 scroll_depth: getScrollDepth(),
                 visit_count: visitCountRef.current, // 몇 번째 방문인지
-                total_dwell_time: Math.round(totalDwellTimeRef.current / 1000) // 이전까지 누적 시간
+                total_dwell_time: Math.round(totalDwellTimeRef.current / 100) / 10 // 이전까지 누적 시간 (초, 소숫점 1자리)
               });
             }
           } else {
@@ -316,8 +323,8 @@ function useSectionTracking(sectionName, options = {}) {
                   section_name: sectionName,
                   enter_time: enterTimeRef.current,
                   exit_time: exitTime,
-                  dwell_time: Math.round(dwellTime / 1000), // 이번 체류 시간
-                  total_dwell_time: Math.round(totalDwellTimeRef.current / 1000), // 총 누적 시간
+                  dwell_time: Math.round(dwellTime / 100) / 10, // 이번 체류 시간 (초, 소숫점 1자리)
+                  total_dwell_time: Math.round(totalDwellTimeRef.current / 100) / 10, // 총 누적 시간 (초, 소숫점 1자리)
                   visit_count: visitCountRef.current,
                   scroll_depth: getScrollDepth()
                 });
@@ -343,8 +350,8 @@ function useSectionTracking(sectionName, options = {}) {
           section_name: sectionName,
           enter_time: enterTimeRef.current,
           exit_time: exitTime,
-          dwell_time: Math.round(dwellTime / 1000),
-          total_dwell_time: Math.round(totalDwellTimeRef.current / 1000),
+          dwell_time: Math.round(dwellTime / 100) / 10,
+          total_dwell_time: Math.round(totalDwellTimeRef.current / 100) / 10,
           visit_count: visitCountRef.current,
           scroll_depth: getScrollDepth()
         });
@@ -863,8 +870,8 @@ function Audience() {
             section_name: 'audience',
             enter_time: audienceState.enterTimeRef.current,
             exit_time: exitTime,
-            dwell_time: Math.round(dwellTime / 1000),
-            total_dwell_time: Math.round(audienceState.totalDwellTimeRef.current / 1000),
+            dwell_time: Math.round(dwellTime / 100) / 10,
+            total_dwell_time: Math.round(audienceState.totalDwellTimeRef.current / 100) / 10,
             visit_count: audienceState.visitCountRef.current,
             scroll_depth: getScrollDepth(),
             trigger: 'scroll_above' // 스크롤로 인한 강제 기록
@@ -970,8 +977,8 @@ function CTA({ ctaRef }) {
                   section_name: 'audience',
                   enter_time: audienceState.enterTimeRef.current,
                   exit_time: exitTime,
-                  dwell_time: Math.round(dwellTime / 1000),
-                  total_dwell_time: Math.round(audienceState.totalDwellTimeRef.current / 1000),
+                  dwell_time: Math.round(dwellTime / 100) / 10,
+                  total_dwell_time: Math.round(audienceState.totalDwellTimeRef.current / 100) / 10,
                   visit_count: audienceState.visitCountRef.current,
                   scroll_depth: getScrollDepth(),
                   trigger: 'cta_enter' // CTA 진입으로 인한 강제 기록
@@ -1003,13 +1010,13 @@ function CTA({ ctaRef }) {
       emailFocusTimeRef.current = focusTime;
 
       const timeToFocus = ctaEnterTimeRef.current
-        ? Math.round((focusTime - ctaEnterTimeRef.current) / 1000)
+        ? Math.round((focusTime - ctaEnterTimeRef.current) / 100) / 10
         : null;
 
       KPITracker.track('cta_email_focus', {
         variant: userType,
         email_focus_time: focusTime,
-        time_to_focus: timeToFocus // 초 단위
+        time_to_focus: timeToFocus // 초 단위, 소숫점 1자리
       });
     }
   };
@@ -1030,7 +1037,7 @@ function CTA({ ctaRef }) {
 
     const submitTime = Date.now();
     const timeToSubmit = emailFocusTimeRef.current
-      ? Math.round((submitTime - emailFocusTimeRef.current) / 1000)
+      ? Math.round((submitTime - emailFocusTimeRef.current) / 100) / 10
       : null;
 
     const num = 2848 + Math.floor(Math.random() * 5);
@@ -1040,7 +1047,7 @@ function CTA({ ctaRef }) {
     KPITracker.track('signup_submit', {
       variant: userType,
       submit_time: submitTime,
-      time_to_submit: timeToSubmit, // 초 단위
+      time_to_submit: timeToSubmit, // 초 단위, 소숫점 1자리
       has_restaurant: !!restaurant,
       email_domain: emailDomain,
       waitlist_number: num
@@ -1207,7 +1214,7 @@ function Hero2({ onCTAClick, headlineMode }) {
         hasScrolled = true;
         const timeToScroll = Date.now() - pageEnterTime;
         KPITracker.track('first_scroll', {
-          timeToScroll: Math.round(timeToScroll / 1000) + 's'
+          timeToScroll: Math.round(timeToScroll / 100) / 10 // 초 단위, 소숫점 1자리
         });
       }
     };
