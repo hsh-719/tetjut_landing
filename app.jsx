@@ -20,10 +20,7 @@ const KPITracker = {
 
     this.events.push(event);
 
-    // 1. 콘솔에 출력 (개발 단계)
-    console.log('📊 KPI:', eventName, data);
-
-    // 2. localStorage에 저장 (브라우저에 누적)
+    // localStorage에 저장 (브라우저에 누적)
     try {
       const stored = JSON.parse(localStorage.getItem('kpi_events') || '[]');
       stored.push(event);
@@ -217,7 +214,6 @@ const KPITracker = {
 
     if (typeof window !== 'undefined' && window.dataLayer) {
       window.dataLayer.push(summary);
-      console.log('📊 세션 요약 전송:', summary);
     }
   }
 };
@@ -234,7 +230,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden && !sessionSummarySent) {
     KPITracker.sendSessionSummary();
     sessionSummarySent = true;
-    console.log('📊 세션 요약 전송 (visibilitychange)');
   }
 });
 
@@ -243,7 +238,6 @@ window.addEventListener('beforeunload', () => {
   if (!sessionSummarySent) {
     KPITracker.sendSessionSummary();
     sessionSummarySent = true;
-    console.log('📊 세션 요약 전송 (beforeunload)');
   }
 });
 
@@ -541,25 +535,25 @@ function Problem() {
 
           <div className="proof-grid">
             <div className="proof-cell">
-              <div className="proof-num"><Counter to={73} format={(x) => Math.round(x)} /><span className="unit">%</span></div>
+              <div className="proof-num"><Counter to={94.1} format={(x) => Math.round(x)} /><span className="unit">%</span></div>
               <div className="proof-label">
-                "맛집 후기 신뢰하지 않는다"고 답한 20-30대 비율
+                "블로그(네x버, 다x), SNS 로 찾아갔을때 실망했다"고 답한 10-50대 비율
               </div>
-              <div className="proof-source">자체 사전 조사 · n=412 · 2025</div>
+              <div className="proof-source">매경헬스 x 식신 · n=1204 · 2021</div>
             </div>
             <div className="proof-cell">
-              <div className="proof-num"><Counter to={4.8} duration={1800} format={(x) => x.toFixed(1)} /><span className="unit">건</span></div>
+              <div className="proof-num"><Counter to={2.21} duration={1800} format={(x) => x.toFixed(1)} /><span className="unit">건</span></div>
               <div className="proof-label">
                 맛집 한 곳을 결정하기 위해 평균적으로 비교 검색하는 횟수
               </div>
-              <div className="proof-source">사용자 인터뷰 · n=24 · 2025</div>
+              <div className="proof-source">한국인지과학회</div>
             </div>
             <div className="proof-cell">
               <div className="proof-num"><Counter to={1} format={(x) => Math.round(x)} />위</div>
               <div className="proof-label">
                 "지인 추천"이 여전히 가장 신뢰하는 맛집 정보 채널
               </div>
-              <div className="proof-source">소비자원 트렌드 리포트 · 2024</div>
+              <div className="proof-source">한국리서치 정기조사 · n=1000 · 2021</div>
             </div>
           </div>
 
@@ -573,14 +567,16 @@ function Problem() {
             <div style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: '20px'
+              gap: '20px',
+              maxWidth: '800px',
+              margin: '0 auto'
             }}>
               {/* 광고 리뷰 이미지 1 */}
               <div style={{
                 position: 'relative',
-                border: '1px solid rgba(242, 238, 230, 0.18)',
-                borderRadius: '4px',
-                overflow: 'hidden'
+                borderRadius: '8px',
+                overflow: 'hidden',
+                lineHeight: 0
               }}>
                 {/* ADS 뱃지 */}
                 <div style={{
@@ -607,9 +603,9 @@ function Problem() {
               {/* 광고 리뷰 이미지 2 */}
               <div style={{
                 position: 'relative',
-                border: '1px solid rgba(242, 238, 230, 0.18)',
-                borderRadius: '4px',
-                overflow: 'hidden'
+                borderRadius: '8px',
+                overflow: 'hidden',
+                lineHeight: 0
               }}>
                 {/* ADS 뱃지 */}
                 <div style={{
@@ -816,8 +812,7 @@ function ProductPreview() {
             fontFamily: 'var(--font-mono)',
             fontSize: 13
           }}>
-            <p style={{ marginBottom: 8 }}>이미지 영역</p>
-            <p style={{ fontSize: 11, opacity: 0.6 }}>여기에 제품 미리보기 이미지를 넣으세요</p>
+            <img src="src/real.png" alt="광고 리뷰 예시 2" style={{ width: '100%', display: 'block' }} />
           </div>
         </div>
       </div>
@@ -1045,9 +1040,6 @@ function CTA({ ctaRef }) {
       waitlist_number: num,
       has_restaurant: !!restaurant
     });
-
-    // A/B 테스트 버전 로깅
-    console.log(`사전등록 완료 - 유저타입: ${userType}, 연락처: ${contact}${restaurant ? `, 단골집: ${restaurant}` : ''}`);
   };
 
   return (
