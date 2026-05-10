@@ -8,13 +8,6 @@ const KPITracker = {
   events: [],
   sectionStates: {}, // 섹션별 상태 저장 (audience 특별 처리용)
 
-  // 중요 전환 이벤트 (GTM 즉시 전송)
-  criticalEvents: [
-    'signup_complete',     // 최종 전환 완료
-    'signup_submit',       // 제출 시도
-    'ab_test_assigned'     // A/B 테스트 배정
-  ],
-
   // KPI 이벤트 기록
   track(eventName, data = {}) {
     const event = {
@@ -39,19 +32,7 @@ const KPITracker = {
       localStorage.setItem('kpi_events', JSON.stringify(stored));
     } catch(e) {}
 
-    // 3. Google Tag Manager로 전송 (중요 이벤트만 즉시 전송)
-    if (this.criticalEvents.includes(eventName)) {
-      if (typeof window !== 'undefined' && window.dataLayer) {
-        window.dataLayer.push({
-          event: 'conversion_event',
-          conversion_type: eventName,
-          ...event
-        });
-      }
-    }
-
-    // 4. 서버로 전송 (필요시 활성화)
-    // this.sendToServer(event);
+    // GTM 전송 안 함 - session_summary만 전송
   },
 
   // 서버 전송 함수 (추후 사용)
