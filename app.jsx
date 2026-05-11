@@ -1076,7 +1076,7 @@ function CTA({ ctaRef }) {
                 </form>
               ) : (
                 <div className="cta-success">
-                  <div className="num tnum">#{waitlistNum?.toLocaleString()}</div>
+                  {/* <div className="num tnum">#{waitlistNum?.toLocaleString()}</div> */}
                   <h3 style={{ color: "var(--paper)", fontSize: 24, marginBottom: 8 }}>터줏대감 대기 명단에 합류했습니다.</h3>
                   <p style={{ color: "rgba(242,238,230,0.7)", fontSize: 15 }}>
                     알파 오픈 시점에 <span className="mono" style={{ color: "var(--paper)" }}>{contact}</span>으로 안내드립니다.
@@ -1114,7 +1114,7 @@ function CTA({ ctaRef }) {
                 </form>
               ) : (
                 <div className="cta-success">
-                  <div className="num tnum">#{waitlistNum?.toLocaleString()}</div>
+                  {/* <div className="num tnum">#{waitlistNum?.toLocaleString()}</div> */}
                   <h3 style={{ color: "var(--paper)", fontSize: 24, marginBottom: 8 }}>방랑객 대기 명단에 합류했습니다.</h3>
                   <p style={{ color: "rgba(242,238,230,0.7)", fontSize: 15 }}>
                     알파 오픈 시점에 <span className="mono" style={{ color: "var(--paper)" }}>{contact}</span>으로 안내드립니다.
