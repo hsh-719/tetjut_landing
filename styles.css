@@ -369,7 +369,18 @@ p { margin: 0; text-wrap: pretty; }
 }
 
 @media (max-width: 980px) {
-  .hero-grid { grid-template-columns: 1fr; }
+  .hero-grid {
+    grid-template-columns: 1fr 0.6fr;
+    gap: 16px;
+    align-items: start;
+  }
+}
+
+@media (max-width: 640px) {
+  .hero-grid {
+    grid-template-columns: 1fr 0.5fr;
+    gap: 12px;
+  }
 }
 
 .hero-eyebrow {
@@ -382,6 +393,12 @@ p { margin: 0; text-wrap: pretty; }
 
 .hero h1 {
   margin-bottom: 28px;
+}
+
+@media (max-width: 980px) {
+  .hero h1 {
+    font-size: clamp(32px, 6vw, 56px);
+  }
 }
 
 .hero h1 .strike {
@@ -397,6 +414,13 @@ p { margin: 0; text-wrap: pretty; }
   max-width: 48ch;
 }
 
+@media (max-width: 980px) {
+  .hero-lede {
+    font-size: 15px;
+    margin-bottom: 24px;
+  }
+}
+
 .hero-cta-row {
   display: flex;
   gap: 14px;
@@ -405,12 +429,24 @@ p { margin: 0; text-wrap: pretty; }
   margin-bottom: 32px;
 }
 
+@media (max-width: 980px) {
+  .hero-cta-row {
+    display: none;
+  }
+}
+
 .hero-meta {
   display: flex;
   gap: clamp(20px, 3vw, 36px);
   border-top: 1px solid var(--line);
   padding-top: 22px;
   flex-wrap: wrap;
+}
+
+@media (max-width: 980px) {
+  .hero-meta {
+    display: none;
+  }
 }
 
 .hero-meta-item .num {
@@ -443,6 +479,13 @@ p { margin: 0; text-wrap: pretty; }
   box-shadow:
     0 1px 0 rgba(255,255,255,0.6) inset,
     0 20px 60px -20px rgba(22, 19, 16, 0.18);
+}
+
+@media (max-width: 980px) {
+  .hero-map {
+    aspect-ratio: 1 / 1.1;
+    border-radius: 12px;
+  }
 }
 
 .hero-map-overlay {
